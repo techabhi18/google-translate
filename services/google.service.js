@@ -14,6 +14,7 @@ const getAuthUrl = () => {
       "https://www.googleapis.com/auth/userinfo.profile",
       "https://www.googleapis.com/auth/userinfo.email",
       "openid",
+      "https://www.googleapis.com/auth/cloud-translation",
     ].join(" "),
     access_type: "offline",
     prompt: "consent",
@@ -66,9 +67,30 @@ const getUserInfo = async (access_token) => {
   return res.data;
 };
 
+const translateText = async (text, targetLanguage, accessToken) => {
+  const url = "https://translation.googleapis.com/language/translate/v2";
+
+  const res = await axios.post(
+    url,
+    {},
+    {
+      params: {
+        q: text,
+        target: targetLanguage,
+      },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  return res.data.data.translations[0].translatedText;
+};
+
 module.exports = {
   getAuthUrl,
   getTokens,
   refreshAccessToken,
   getUserInfo,
+  translateText,
 };

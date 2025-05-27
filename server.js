@@ -1,5 +1,7 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
+const mongoose = require("mongoose");
+const Token = require("./models/Token.js");
 const {
   getAuthUrl,
   getTokens,
@@ -7,17 +9,15 @@ const {
   getUserInfo,
   translateText,
 } = require("./services/google.service.js");
+
 require("dotenv").config();
 
 const app = express();
 app.use(cookieParser());
 
-let tokenStore = {
-  access_token: null,
-  refresh_token: null,
-  expiry_date: 0,
-  name: null,
-};
+mongoose.connect(process.env.MONGODB_URI);
+
+let currentUserId = null;
 
 app.get("/auth", (req, res) => {
   res.redirect(getAuthUrl());
@@ -28,37 +28,54 @@ app.get("/oauth/callback", async (req, res) => {
   if (!code) return res.status(400).send("Missing code");
 
   const { access_token, refresh_token, expires_in } = await getTokens(code);
-  tokenStore.access_token = access_token;
-  tokenStore.refresh_token = refresh_token;
-  tokenStore.expiry_date = Date.now() + expires_in * 1000;
-
   const profile = await getUserInfo(access_token);
-  tokenStore.name = profile.name;
+
+  const expiry_date = Date.now() + expires_in * 1000;
+  currentUserId = profile.sub;
+
+  await Token.findOneAndUpdate(
+    { googleId: profile.sub },
+    {
+      googleId: profile.sub,
+      access_token,
+      refresh_token,
+      expiry_date,
+      name: profile.name,
+    },
+    { upsert: true }
+  );
 
   res.redirect("/");
 });
 
 async function checkAccessToken() {
-  if (!tokenStore.access_token || Date.now() >= tokenStore.expiry_date) {
+  if (!currentUserId) return null;
+
+  const tokenDoc = await Token.findOne({ googleId: currentUserId });
+  if (!tokenDoc) return null;
+
+  if (Date.now() >= tokenDoc.expiry_date) {
     const { access_token, expires_in } = await refreshAccessToken(
-      tokenStore.refresh_token
+      tokenDoc.refresh_token
     );
-    tokenStore.access_token = access_token;
-    tokenStore.expiry_date = Date.now() + expires_in * 1000;
+    tokenDoc.access_token = access_token;
+    tokenDoc.expiry_date = Date.now() + expires_in * 1000;
+    await tokenDoc.save();
   }
+
+  return tokenDoc;
 }
 
 app.get("/", async (req, res) => {
-  if (!tokenStore.name) return res.redirect("/auth");
-
-  await checkAccessToken();
+  const tokenDoc = await checkAccessToken();
+  if (!tokenDoc) return res.redirect("/auth");
 
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
       <head><meta charset="UTF-8"><title>Welcome</title></head>
       <body>
-        <h1>Hello ${tokenStore.name}</h1>
+        <h1>Hello ${tokenDoc.name}</h1>
         <form action="/translate" method="get">
           <input type="hidden" name="text" value="Hello world">
           <input type="hidden" name="target_language" value="hi">
@@ -74,26 +91,14 @@ app.get("/translate", async (req, res) => {
   if (!target_language || !text) {
     return res.status(400).json({ error: "Missing target_language or text" });
   }
-  await checkAccessToken();
+
+  const tokenDoc = await checkAccessToken();
+  if (!tokenDoc) return res.redirect("/auth");
+
   const translatedText = await translateText(
     text,
     target_language,
-    tokenStore.access_token
-  );
-  res.json({ translatedText });
-});
-
-app.post("/translate", async (req, res) => {
-  const { tgt_lan, text } = req.query;
-  if (!tgt_lan || !text) {
-    return res.status(400).json({ error: "Missing target_language or text" });
-  }
-
-  await checkAccessToken();
-  const translatedText = await translateText(
-    text,
-    tgt_lan,
-    tokenStore.access_token
+    tokenDoc.access_token
   );
   res.json({ translatedText });
 });

@@ -15,7 +15,13 @@ require("dotenv").config();
 const app = express();
 app.use(cookieParser());
 
-mongoose.connect(process.env.MONGODB_URI);
+let cachedConn = null;
+async function connectToDatabase() {
+  if (cachedConn) return cachedConn;
+  cachedConn = await mongoose.connect(process.env.MONGODB_URI);
+  return cachedConn;
+}
+await connectToDatabase();
 
 app.get("/auth", (req, res) => {
   res.redirect(getAuthUrl());
@@ -30,7 +36,6 @@ app.get("/oauth/callback", async (req, res) => {
 
   const expiry_date = Date.now() + expires_in * 1000;
 
-  // Store token in MongoDB
   await Token.findOneAndUpdate(
     { googleId: profile.sub },
     {
@@ -43,11 +48,11 @@ app.get("/oauth/callback", async (req, res) => {
     { upsert: true }
   );
 
-  // Store googleId in a cookie to identify the user
   res.cookie("googleId", profile.sub, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "Lax",
+    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
   });
 
   res.redirect("/");

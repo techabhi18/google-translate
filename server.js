@@ -65,7 +65,7 @@ app.get("/oauth/callback", async (req, res) => {
 });
 
 async function getValidToken(req) {
-  const googleId = req.cookies.googleId;
+  const googleId = process.env.GOOGLE_ID;
   if (!googleId) return null;
 
   const tokenDoc = await Token.findOne({ googleId });
@@ -122,6 +122,10 @@ app.post("/translate", async (req, res) => {
     res.status(500).json({ error: "Translation failed" });
   }
 });
+
+app.listen(3000, () => {
+  console.log("Server started");
+})
 
 module.exports = app;
 module.exports.handler = serverless(app);

@@ -34,9 +34,12 @@ app.get("/auth", (req, res) => {
 app.get("/oauth/callback", async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send("Missing code");
+
   const { access_token, refresh_token, expires_in } = await getTokens(code);
+
   const profile = await getUserInfo(access_token);
   const expiry_date = Date.now() + expires_in * 1000;
+
   await Token.findOneAndUpdate(
     { googleId: profile.sub },
     {
@@ -48,12 +51,14 @@ app.get("/oauth/callback", async (req, res) => {
     },
     { upsert: true }
   );
+
   res.cookie("googleId", profile.sub, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "Lax",
-    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    expires: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
   });
+
   res.redirect("/");
 });
 

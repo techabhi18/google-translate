@@ -13,6 +13,8 @@ const {
 require("dotenv").config();
 
 const app = express();
+
+app.use(express.json());
 app.use(cookieParser());
 
 let cachedConn = false;
@@ -65,8 +67,10 @@ app.get("/oauth/callback", async (req, res) => {
 async function getValidToken(req) {
   const googleId = req.cookies.googleId;
   if (!googleId) return null;
+
   const tokenDoc = await Token.findOne({ googleId });
   if (!tokenDoc) return null;
+
   if (Date.now() >= tokenDoc.expiry_date) {
     const { access_token, expires_in } = await refreshAccessToken(
       tokenDoc.refresh_token
@@ -97,19 +101,26 @@ app.get("/", async (req, res) => {
   `);
 });
 
-app.get("/translate", async (req, res) => {
-  const { target_language, text } = req.query;
-  if (!target_language || !text) {
-    return res.status(400).json({ error: "Missing target_language or text" });
+app.post("/translate", async (req, res) => {
+  const { text, tgt_lang } = req.body;
+  if (!text || !tgt_lang) {
+    return res.status(400).json({ error: "Missing text or tgt_lang" });
   }
+
   const tokenDoc = await getValidToken(req);
-  if (!tokenDoc) return res.redirect("/auth");
-  const translatedText = await translateText(
-    text,
-    target_language,
-    tokenDoc.access_token
-  );
-  res.json({ translatedText });
+  if (!tokenDoc) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const translatedText = await translateText(
+      text,
+      tgt_lang,
+      tokenDoc.access_token
+    );
+    res.json({ translatedText });
+  } catch (err) {
+    console.error("Translation failed:", err);
+    res.status(500).json({ error: "Translation failed" });
+  }
 });
 
 module.exports = app;
